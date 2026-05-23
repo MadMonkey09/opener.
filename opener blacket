@@ -1,0 +1,86 @@
+(async () => {
+  // === 1. GET USER INPUT ===
+  const packList = Object.keys(blacket.packs);
+  let choice = prompt(`Enter pack name:\n${packList.join(", ")}`);
+  if (!choice) return;
+  
+  const pack = packList.find(p => p.toLowerCase() === choice.toLowerCase());
+  if (!pack) return alert("Pack not found!");
+
+  const maxPacks = Math.floor(blacket.user.tokens / blacket.packs[pack].price);
+  let amount = parseInt(prompt(`How many to open? (Max: ${maxPacks})`));
+  if (!amount || amount < 1 || amount > maxPacks) return alert("Invalid amount!");
+
+  // === 2. CREATE MINIMALIST UI ===
+  const ui = document.createElement("div");
+  Object.assign(ui.style, {
+    position: "fixed",
+    top: "20px",
+    right: "20px",
+    width: "280px",
+    background: "#121214",
+    color: "#fff",
+    padding: "15px",
+    borderRadius: "8px",
+    fontFamily: "monospace",
+    fontSize: "13px",
+    boxShadow: "0 4px 15px rgba(0,0,0,0.5)",
+    border: "1px solid #333",
+    zIndex: "999999"
+  });
+  document.body.appendChild(ui);
+
+  const status = document.createElement("div");
+  status.style.marginBottom = "10px";
+  ui.appendChild(status);
+
+  const list = document.createElement("div");
+  list.style.maxHeight = "150px";
+  list.style.overflowY = "auto";
+  ui.appendChild(list);
+
+  // === 3. OPENING LOGIC ===
+  const inventory = {};
+  let opened = 0;
+  const price = blacket.packs[pack].price;
+
+  while (opened < amount) {
+    try {
+      // Send request to open pack
+      const blook = await new Promise((res, rej) => {
+        blacket.requests.post("/worker3/open", { pack }, d => d.error ? rej() : res(d.blook));
+      });
+
+      const rarity = blacket.blooks[blook].rarity;
+      const rData = blacket.rarities[rarity];
+
+      // Update local values
+      blacket.user.tokens -= price;
+      opened++;
+      inventory[blook] = (inventory[blook] || 0) + 1;
+
+      // Update UI Status
+      status.innerHTML = `
+        <b>[ OPENING ${pack.toUpperCase()} ]</b><br>
+        Progress: ${opened} / ${amount}<br>
+        Tokens Left: ${blacket.user.tokens.toLocaleString()}
+      `;
+
+      // Update UI Blook List with Glow Effect
+      list.innerHTML = "";
+      for (const item in inventory) {
+        const color = blacket.rarities[blacket.blooks[item].rarity].color;
+        list.innerHTML += `<div style="color: ${color}; text-shadow: 0 0 8px ${color}, 0 0 12px ${color}; font-weight: bold; margin-bottom: 3px;">${item} x${inventory[item]}</div>`;
+      }
+
+      // Wait out the required rarity delay
+      await new Promise(r => setTimeout(r, rData.wait));
+    } catch (e) {
+      // Fallback delay on rate limit/error
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  // === 4. FINISHED STATE ===
+  status.innerHTML = `<b>[ FINISHED ]</b><br>Opened: ${opened}<br>Tokens Left: ${blacket.user.tokens.toLocaleString()}`;
+})();
