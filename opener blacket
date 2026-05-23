@@ -1,86 +1,376 @@
-(async () => {
-  // === 1. GET USER INPUT ===
-  const packList = Object.keys(blacket.packs);
-  let choice = prompt(`Enter pack name:\n${packList.join(", ")}`);
-  if (!choice) return;
-  
-  const pack = packList.find(p => p.toLowerCase() === choice.toLowerCase());
-  if (!pack) return alert("Pack not found!");
+$(function () {
+    let resultMap = {};
+    let isOpening = false;
 
-  const maxPacks = Math.floor(blacket.user.tokens / blacket.packs[pack].price);
-  let amount = parseInt(prompt(`How many to open? (Max: ${maxPacks})`));
-  if (!amount || amount < 1 || amount > maxPacks) return alert("Invalid amount!");
+    const titanFont = `'Titan One', cursive`;
 
-  // === 2. CREATE MINIMALIST UI ===
-  const ui = document.createElement("div");
-  Object.assign(ui.style, {
-    position: "fixed",
-    top: "20px",
-    right: "20px",
-    width: "280px",
-    background: "#121214",
-    color: "#fff",
-    padding: "15px",
-    borderRadius: "8px",
-    fontFamily: "monospace",
-    fontSize: "13px",
-    boxShadow: "0 4px 15px rgba(0,0,0,0.5)",
-    border: "1px solid #333",
-    zIndex: "999999"
-  });
-  document.body.appendChild(ui);
+    // Load Titan One
+    $('head').append(
+        `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Titan+One&display=swap">`
+    );
 
-  const status = document.createElement("div");
-  status.style.marginBottom = "10px";
-  ui.appendChild(status);
+    /* ===============================
+       TOP OPENED / TOTAL BAR
+    =============================== */
+    const counterBar = $(`
+        <div id="packCounterBar" style="
+            position:fixed;
+            top:0;
+            left:50%;
+            transform:translateX(-50%);
+            background:#111;
+            color:white;
+            padding:8px 20px;
+            border-radius:0 0 14px 14px;
+            font-family:${titanFont};
+            font-size:16px;
+            z-index:3000;
+            display:none;
+            box-shadow:0 4px 10px rgba(0,0,0,0.4);
+        ">0/0</div>
+    `);
+    $('body').append(counterBar);
 
-  const list = document.createElement("div");
-  list.style.maxHeight = "150px";
-  list.style.overflowY = "auto";
-  ui.appendChild(list);
+    /* ===============================
+       RESULT PANEL
+    =============================== */
+    const resultPanel = $(`
+        <section id="blookTally" style="
+            display:none;
+            position:fixed;
+            top:95px;
+            bottom:0;
+            right:20px;
+            width:320px;
+            overflow-y:auto;
+            background:#121214;
+            color:#fff;
+            padding:15px;
+            border:1px solid #333;
+            border-radius:10px;
+            z-index:2000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            font-family: monospace;
+            font-size: 13px;
+        "></section>
+    `);
+    $('body').append(resultPanel);
 
-  // === 3. OPENING LOGIC ===
-  const inventory = {};
-  let opened = 0;
-  const price = blacket.packs[pack].price;
+    function appendBlookResult(name) {
+        const info = blacket.blooks[name] || {};
+        const rarity = info.rarity || "Unknown";
+        const img = info.image || "/content/blooks/Error.webp";
+        const color = blacket.rarities[rarity]?.color || "#fff";
 
-  while (opened < amount) {
-    try {
-      // Send request to open pack
-      const blook = await new Promise((res, rej) => {
-        blacket.requests.post("/worker3/open", { pack }, d => d.error ? rej() : res(d.blook));
-      });
+        if (!resultMap[name]) {
+            const el = $(`
+                <div data-rarity="${rarity}" style="
+                    display:flex;
+                    align-items:center;
+                    margin:6px 0;
+                    color:${color};
+                    text-shadow: 0 0 8px ${color}, 0 0 12px ${color};
+                    font-weight:bold;
+                ">
+                    <img src="${img}" style="width:20px;height:20px;margin-right:10px; filter: drop-shadow(0px 0px 4px ${color});">
+                    <span>${name} x<span class="count">1</span></span>
+                </div>
+            `);
+            resultMap[name] = { count: 1, rarity, el };
+        } else {
+            resultMap[name].count++;
+            resultMap[name].el.find(".count").text(resultMap[name].count);
+        }
 
-      const rarity = blacket.blooks[blook].rarity;
-      const rData = blacket.rarities[rarity];
-
-      // Update local values
-      blacket.user.tokens -= price;
-      opened++;
-      inventory[blook] = (inventory[blook] || 0) + 1;
-
-      // Update UI Status
-      status.innerHTML = `
-        <b>[ OPENING ${pack.toUpperCase()} ]</b><br>
-        Progress: ${opened} / ${amount}<br>
-        Tokens Left: ${blacket.user.tokens.toLocaleString()}
-      `;
-
-      // Update UI Blook List with Glow Effect
-      list.innerHTML = "";
-      for (const item in inventory) {
-        const color = blacket.rarities[blacket.blooks[item].rarity].color;
-        list.innerHTML += `<div style="color: ${color}; text-shadow: 0 0 8px ${color}, 0 0 12px ${color}; font-weight: bold; margin-bottom: 3px;">${item} x${inventory[item]}</div>`;
-      }
-
-      // Wait out the required rarity delay
-      await new Promise(r => setTimeout(r, rData.wait));
-    } catch (e) {
-      // Fallback delay on rate limit/error
-      await new Promise(r => setTimeout(r, 1000));
+        sortResults();
     }
-  }
 
-  // === 4. FINISHED STATE ===
-  status.innerHTML = `<b>[ FINISHED ]</b><br>Opened: ${opened}<br>Tokens Left: ${blacket.user.tokens.toLocaleString()}`;
-})();
+    function sortResults() {
+        const order = Object.keys(blacket.rarities);
+        const list = Object.values(resultMap).sort(
+            (a, b) =>
+                (order.indexOf(a.rarity) ?? 999) -
+                (order.indexOf(b.rarity) ?? 999)
+        );
+
+        resultPanel.children().not(".summary-container").remove();
+        list.forEach(x => resultPanel.append(x.el));
+    }
+
+    function finishSummary(opened) {
+        const summaryWrapper = $(`<div class="summary-container" style="margin-top:15px; border-top: 1px solid #333; padding-top:10px;"></div>`);
+        
+        const summary = $(`
+            <div style="font-weight:bold; color:#fff; font-family:${titanFont}; font-size:14px; margin-bottom:8px;">
+                [ FINISHED ]<br>
+                Opened: ${opened}<br>
+                Tokens Left: ${blacket.user.tokens.toLocaleString()}
+            </div>
+        `);
+        
+        const repeat = $(`
+            <button style="
+                width:100%;
+                padding:8px;
+                background:#444;
+                color:white;
+                border:none;
+                border-radius:6px;
+                cursor:pointer;
+                font-family:${titanFont};
+                font-size:12px;
+            ">Open More</button>
+        `);
+
+        repeat.on("click", () => {
+            $("#packModal").fadeIn();
+            resultPanel.hide();
+        });
+
+        summaryWrapper.append(summary, repeat);
+        resultPanel.append(summaryWrapper);
+    }
+
+    async function beginOpening(pack, total, cost) {
+        if (isOpening) return;
+        isOpening = true;
+        resultMap = {};
+
+        resultPanel.empty().html(`
+            <div class="summary-container" style="font-family:${titanFont}; font-size:14px; margin-bottom:10px;">
+                <b>[ OPENING ${pack.toUpperCase()} ]</b>
+            </div>
+        `).show();
+
+        let opened = 0;
+        counterBar.text(`0/${total}`).fadeIn();
+
+        const original = blacket.openPack;
+        blacket.openPack = p =>
+            new Promise(resolve => {
+                blacket.startLoading();
+                blacket.requests.post("/worker3/open", { pack: p }, res => {
+                    blacket.stopLoading();
+                    if (res?.error) return resolve(null);
+                    blacket.user.tokens -= cost;
+                    $("#tokenBalance > div:nth-child(2)").text(blacket.user.tokens.toLocaleString());
+                    blacket.user.blooks[res.blook] = (blacket.user.blooks[res.blook] || 0) + 1;
+                    resolve(res.blook);
+                });
+            });
+
+        for (let i = 0; i < total; i++) {
+            if (blacket.user.tokens < cost) break;
+
+            try {
+                const blook = await blacket.openPack(pack);
+                if (blook) {
+                    appendBlookResult(blook);
+                    await new Promise(r =>
+                        setTimeout(r, blacket.rarities[blacket.blooks[blook]?.rarity]?.wait ?? 50)
+                    );
+                }
+            } catch (e) {
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            opened++;
+            counterBar.text(`${opened}/${total}`);
+        }
+
+        blacket.openPack = original;
+        finishSummary(opened);
+        isOpening = false;
+
+        setTimeout(() => counterBar.fadeOut(), 1200);
+    }
+
+    /* ===============================
+       UI CONTROLS
+    =============================== */
+    
+    // === NEW CHROME/CYBER PACK SELECTOR ===
+    const packs = Object.keys(blacket.packs).filter(p => !blacket.packs[p].hidden);
+    const packSelect = $(`
+        <select style="
+            display: block;
+            width: 100%;
+            margin: 15px auto;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: #111115;
+            color: #fff;
+            font-family: ${titanFont};
+            font-size: 14px;
+            outline: none;
+            border: 1px solid #333;
+            cursor: pointer;
+            text-align-last: center;
+            transition: border 0.2s ease;
+        "></select>
+    `);
+    packs.forEach(p => packSelect.append(`<option value="${p}">${p.toUpperCase()}</option>`));
+    packSelect.on("focus", function() { $(this).css("border-color", "#00e5ff"); });
+    packSelect.on("blur", function() { $(this).css("border-color", "#333"); });
+
+    // === MODERN SELECTION WRAPPER ===
+    const modeSwitch = $(`
+        <div style="
+            margin: 18px 0;
+            font-family: ${titanFont}; 
+            font-size: 13px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        ">
+            <label style="cursor:pointer; display: flex; align-items: center; gap: 6px; color: #aaa; transition: color 0.2s;">
+                <input type="radio" name="mode" value="packs" checked style="accent-color: #00e5ff; cursor: pointer;"> PACK LIMIT
+            </label>
+            <label style="cursor:pointer; display: flex; align-items: center; gap: 6px; color: #aaa; transition: color 0.2s;">
+                <input type="radio" name="mode" value="tokens" style="accent-color: #00e5ff; cursor: pointer;"> TOKEN LIMIT
+            </label>
+        </div>
+    `);
+    modeSwitch.find("label").on("mouseenter", function() { $(this).css("color", "#fff"); });
+    modeSwitch.find("label").on("mouseleave", function() { if(!$(this).find("input").is(":checked")) $(this).css("color", "#aaa"); });
+
+    // === HIGH TECH AMOUNT INPUT ===
+    const amountInput = $(`
+        <input type="number" min="1" value="10" style="
+            display: block;
+            width: 80%;
+            margin: 15px auto;
+            padding: 10px;
+            border-radius: 8px;
+            background: #111115;
+            border: 1px solid #333;
+            color: #fff;
+            font-family: ${titanFont}; 
+            font-size: 16px;
+            text-align: center;
+            outline: none;
+            transition: all 0.2s ease;
+        ">
+    `);
+    amountInput.on("focus", function() { $(this).css({"border-color": "#00e5ff", "box-shadow": "0 0 8px rgba(0,229,255,0.2)"}); });
+    amountInput.on("blur", function() { $(this).css({"border-color": "#333", "box-shadow": "none"}); });
+    
+    // === SYSTEM INITIALIZE BUTTON ===
+    const openBtn = $(`
+        <button style="
+            margin-top: 15px;
+            width: 100%;
+            padding: 12px 0;
+            background: #000;
+            color: #00e5ff;
+            border: 2px solid #00e5ff;
+            border-radius: 8px;
+            font-family: ${titanFont};
+            font-size: 14px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.15);
+            transition: all 0.25s ease-in-out;
+            outline: none;
+        ">INITIALIZE SYSTEM</button>
+    `);
+
+    openBtn.on("mouseenter", function() {
+        $(this).css({
+            "background": "#00e5ff",
+            "color": "#000",
+            "box-shadow": "0 0 20px rgba(0, 229, 255, 0.5)",
+            "transform": "scale(1.02)"
+        });
+    }).on("mouseleave", function() {
+        $(this).css({
+            "background": "#000",
+            "color": "#00e5ff",
+            "box-shadow": "0 0 10px rgba(0, 229, 255, 0.15)",
+            "transform": "scale(1)"
+        });
+    });
+
+    // === OVERHAULED MODAL CONTAINER ===
+    const modal = $(`<div id="packModal" style="
+        position: fixed;
+        top: 25%;
+        left: 50%;
+        transform: translate(-50%, -25%);
+        background: #0a0a0c;
+        border: 2px solid #00e5ff;
+        padding: 30px;
+        width: 300px;
+        border-radius: 12px;
+        z-index: 1001;
+        display: none;
+        text-align: center;
+        color: white;
+        font-family: ${titanFont};
+        box-shadow: 0 12px 35px rgba(0,0,0,0.8);
+    "></div>`);
+
+    // Screen Title Header
+    modal.append(`<div style="font-size: 16px; color:#fff; letter-spacing:1px; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom:10px;">CONFIG_MATRIX</div>`);
+    modal.append(packSelect, modeSwitch, amountInput, openBtn);
+
+    // === FLOATING TRIGGER BUTTON ===
+    const trigger = $(`
+        <button style="
+            position: fixed;
+            top: 60px;
+            right: 20px;
+            padding: 12px 26px;
+            border-radius: 8px;
+            background: #000;
+            color: #d500f9;
+            border: 2px solid #d500f9;
+            font-family: ${titanFont};
+            font-size: 14px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            box-shadow: 0 0 12px rgba(213, 0, 249, 0.25);
+            transition: all 0.25s ease-in-out;
+            outline: none;
+            z-index: 9999;
+        ">OPEN PACKS</button>
+    `);
+
+    trigger.on("mouseenter", function() {
+        $(this).css({
+            "background": "#d500f9",
+            "color": "#000",
+            "box-shadow": "0 0 22px rgba(213, 0, 249, 0.65)",
+            "transform": "scale(1.04)"
+        });
+    }).on("mouseleave", function() {
+        $(this).css({
+            "background": "#000",
+            "color": "#d500f9",
+            "box-shadow": "0 0 12px rgba(213, 0, 249, 0.25)",
+            "transform": "scale(1)"
+        });
+    });
+
+    trigger.on("click", () => {
+        modal.fadeIn();
+        trigger.remove();
+    });
+
+    openBtn.on("click", () => {
+        const pack = packSelect.val();
+        const mode = $("input[name='mode']:checked").val();
+        let amount = parseInt(amountInput.val(), 10);
+        const price = blacket.packs[pack].price;
+
+        if (mode === "tokens") amount = Math.floor(amount / price);
+        amount = Math.min(amount, Math.floor(blacket.user.tokens / price));
+
+        if (amount <= 0) return alert("Not enough tokens.");
+
+        modal.fadeOut();
+        beginOpening(pack, amount, price);
+    });
+
+    $("body").append(trigger, modal);
+});
